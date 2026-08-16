@@ -1,0 +1,27 @@
+# Binaries
+/bin/
+*.exe
+*.test
+*.out
+
+# Go workspace / build cache
+/vendor/
+go.work
+go.work.sum
+
+# Local env & secrets
+.env
+.env.local
+*.local
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# OS noise
+.DS_Store
+
+# Coverage
+coverage.txt
+coverage.html

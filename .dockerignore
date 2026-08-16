@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+.vscode
+bin
+docs
+test
+*.md
+.env*
+.DS_Store
+coverage.*
