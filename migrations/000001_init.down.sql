@@ -1,0 +1,9 @@
+BEGIN;
+
+DROP TABLE IF EXISTS idempotency_keys;
+DROP TABLE IF EXISTS artifacts;
+DROP TABLE IF EXISTS processing_steps;
+DROP TABLE IF EXISTS attempts;
+DROP TABLE IF EXISTS jobs;
+
+COMMIT;
