@@ -1,0 +1,155 @@
+# Portrait Engine local stack: api, worker, postgres, nats (JetStream), minio.
+# Bring up with `make dev` (from the repo root).
+
+name: portrait-engine
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: portrait
+      POSTGRES_PASSWORD: portrait
+      POSTGRES_DB: portrait
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portrait -d portrait"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nats:
+    image: nats:2.10-alpine
+    # -js enables JetStream; -m 8222 exposes the monitoring/health endpoint.
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - natsdata:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: create the bucket after MinIO is healthy.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mc alias set local http://minio:9000 minioadmin minioadmin &&
+        mc mb --ignore-existing local/portraits &&
+        echo "bucket ready"
+    restart: "no"
+
+  # One-shot migration runner. Invoked via `make migrate-up` (profile keeps it
+  # out of the default `up`). Uses golang-migrate against the compose network.
+  migrate:
+    image: migrate/migrate:4
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../migrations:/migrations
+    # Args are supplied by the make target (path/database/up|down).
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BIN: api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      APP_ENV: dev
+      LOG_LEVEL: info
+      HTTP_ADDR: ":8080"
+      POSTGRES_DSN: "postgres://portrait:portrait@postgres:5432/portrait?sslmode=disable"
+      NATS_URL: "nats://nats:4222"
+      S3_ENDPOINT: "minio:9000"
+      # Presigned URLs are signed for this host so a client on the host machine
+      # can reach them (the in-network endpoint "minio" is not resolvable there).
+      S3_PUBLIC_ENDPOINT: "localhost:9000"
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: portraits
+      S3_USE_SSL: "false"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "/app", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BIN: worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      APP_ENV: dev
+      LOG_LEVEL: info
+      WORKER_CONCURRENCY: "4"
+      POSTGRES_DSN: "postgres://portrait:portrait@postgres:5432/portrait?sslmode=disable"
+      NATS_URL: "nats://nats:4222"
+      S3_ENDPOINT: "minio:9000"
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: portraits
+      S3_USE_SSL: "false"
+      WORKER_METRICS_ADDR: ":8081"
+    ports:
+      - "8081:8081" # /metrics + /health
+    healthcheck:
+      test: ["CMD", "/app", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  pgdata:
+  natsdata:
+  miniodata:
