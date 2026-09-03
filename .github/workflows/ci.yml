@@ -32,7 +32,11 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.64.8
+          # Build the linter with the runner's Go toolchain instead of pulling a
+          # prebuilt binary: the published v1 binaries are built with go1.24 and
+          # refuse a module targeting a newer Go than themselves.
+          install-mode: goinstall
 
   test:
     name: Unit tests (race)
